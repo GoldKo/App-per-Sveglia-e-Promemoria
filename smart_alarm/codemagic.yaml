@@ -1,0 +1,23 @@
+workflows:
+  ios-release:
+    name: Build iOS IPA
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+
+    scripts:
+      - name: Install Pods
+        script: | 
+          cd ios
+          pod install --repo-update
+
+      - name: Build IPA
+        script: |
+          flutter config --no-analytics
+          flutter pub get
+          flutter build ipa --release --export-method ad-hoc --dart-define=APP_ENV=prod
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - build/ios/**/Runner.app.dSYM.zip
