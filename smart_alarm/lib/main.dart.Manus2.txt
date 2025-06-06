@@ -1,0 +1,773 @@
+// Implementazione di alcune delle funzionalità proposte per SmartAlarm Pro
+
+// 1. Classe per gestire le sveglie ricorrenti
+class RecurringAlarm extends Alarm {
+  final List<bool> daysOfWeek; // [lun, mar, mer, gio, ven, sab, dom]
+  
+  RecurringAlarm({
+    required int id,
+    required DateTime time,
+    required String sound,
+    required String gameType,
+    required this.daysOfWeek,
+  }) : super(id: id, time: time, sound: sound, gameType: gameType);
+  
+  @override
+  String toJson() => jsonEncode({
+    'id': id,
+    'time': time.toIso8601String(),
+    'sound': sound,
+    'gameType': gameType,
+    'daysOfWeek': daysOfWeek,
+    'isRecurring': true,
+  });
+  
+  factory RecurringAlarm.fromJson(Map<String, dynamic> map) {
+    return RecurringAlarm(
+      id: map['id'],
+      time: DateTime.parse(map['time']),
+      sound: map['sound'],
+      gameType: map['gameType'],
+      daysOfWeek: List<bool>.from(map['daysOfWeek']),
+    );
+  }
+  
+  bool isActiveToday() {
+    final today = DateTime.now().weekday - 1; // 0 = lunedì, 6 = domenica
+    return daysOfWeek[today];
+  }
+  
+  List<String> getActiveDaysText() {
+    final dayNames = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+    final activeDays = <String>[];
+    
+    for (int i = 0; i < 7; i++) {
+      if (daysOfWeek[i]) {
+        activeDays.add(dayNames[i]);
+      }
+    }
+    
+    return activeDays;
+  }
+}
+
+// 2. Estensione della classe NotificationService per supportare sveglie ricorrenti
+extension RecurringAlarmNotificationService on NotificationService {
+  Future<void> scheduleRecurringAlarmNotification({
+    required RecurringAlarm alarm,
+  }) async {
+    // Cancella eventuali notifiche esistenti per questo ID
+    await cancelNotification(alarm.id);
+    
+    // Pianifica le notifiche per i prossimi 7 giorni
+    final now = DateTime.now();
+    
+    for (int i = 0; i < 7; i++) {
+      final day = now.add(Duration(days: i));
+      final dayOfWeek = day.weekday - 1; // 0 = lunedì, 6 = domenica
+      
+      if (alarm.daysOfWeek[dayOfWeek]) {
+        final scheduledTime = DateTime(
+          day.year,
+          day.month,
+          day.day,
+          alarm.time.hour,
+          alarm.time.minute,
+        );
+        
+        // Salta se l'orario è già passato per oggi
+        if (scheduledTime.isBefore(now)) continue;
+        
+        await scheduleAlarmNotification(
+          id: alarm.id + i, // Usa ID diversi per ogni giorno
+          time: scheduledTime,
+          gameType: alarm.gameType,
+          sound: alarm.sound,
+        );
+      }
+    }
+  }
+}
+
+// 3. Widget per selezionare i giorni della settimana per le sveglie ricorrenti
+class WeekdaySelector extends StatefulWidget {
+  final List<bool> selectedDays;
+  final Function(List<bool>) onChanged;
+  
+  const WeekdaySelector({
+    Key? key,
+    required this.selectedDays,
+    required this.onChanged,
+  }) : super(key: key);
+  
+  @override
+  _WeekdaySelectorState createState() => _WeekdaySelectorState();
+}
+
+class _WeekdaySelectorState extends State<WeekdaySelector> {
+  late List<bool> _selectedDays;
+  
+  @override
+  void initState() {
+    super.initState();
+    _selectedDays = List.from(widget.selectedDays);
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    final dayNames = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
+    
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: List.generate(7, (index) {
+        return GestureDetector(
+          onTap: () {
+            setState(() {
+              _selectedDays[index] = !_selectedDays[index];
+              widget.onChanged(_selectedDays);
+            });
+          },
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _selectedDays[index] ? Theme.of(context).primaryColor : Colors.transparent,
+              border: Border.all(
+                color: Theme.of(context).primaryColor,
+                width: 1,
+              ),
+            ),
+            child: Center(
+              child: Text(
+                dayNames[index],
+                style: TextStyle(
+                  color: _selectedDays[index] ? Colors.white : Theme.of(context).primaryColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+}
+
+// 4. Implementazione della modalità relax con suoni rilassanti
+class RelaxScreen extends StatefulWidget {
+  const RelaxScreen({Key? key}) : super(key: key);
+  
+  @override
+  _RelaxScreenState createState() => _RelaxScreenState();
+}
+
+class _RelaxScreenState extends State<RelaxScreen> {
+  final List<Map<String, dynamic>> _relaxSounds = [
+    {'name': 'Pioggia', 'asset': 'assets/sounds/rain.mp3', 'icon': Icons.water_drop},
+    {'name': 'Onde', 'asset': 'assets/sounds/waves.mp3', 'icon': Icons.waves},
+    {'name': 'Foresta', 'asset': 'assets/sounds/forest.mp3', 'icon': Icons.forest},
+    {'name': 'Fuoco', 'asset': 'assets/sounds/fire.mp3', 'icon': Icons.local_fire_department},
+    {'name': 'Vento', 'asset': 'assets/sounds/wind.mp3', 'icon': Icons.air},
+  ];
+  
+  String? _currentSound;
+  int _timerMinutes = 30;
+  bool _isPlaying = false;
+  
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Relax'),
+        centerTitle: true,
+      ),
+      body: Column(
+        children: [
+          // Timer slider
+          Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              children: [
+                Text(
+                  'Timer: $_timerMinutes minuti',
+                  style: const TextStyle(fontSize: 18),
+                ),
+                Slider(
+                  value: _timerMinutes.toDouble(),
+                  min: 5,
+                  max: 120,
+                  divisions: 23,
+                  onChanged: (value) {
+                    setState(() {
+                      _timerMinutes = value.round();
+                    });
+                  },
+                ),
+              ],
+            ),
+          ),
+          
+          // Suoni rilassanti
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(10),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 1.5,
+                crossAxisSpacing: 10,
+                mainAxisSpacing: 10,
+              ),
+              itemCount: _relaxSounds.length,
+              itemBuilder: (context, index) {
+                final sound = _relaxSounds[index];
+                final isSelected = sound['asset'] == _currentSound;
+                
+                return Card(
+                  color: isSelected ? Theme.of(context).primaryColor.withOpacity(0.2) : null,
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        if (isSelected) {
+                          _currentSound = null;
+                          _isPlaying = false;
+                          // Ferma la riproduzione
+                        } else {
+                          _currentSound = sound['asset'];
+                          _isPlaying = true;
+                          // Avvia la riproduzione
+                        }
+                      });
+                    },
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          sound['icon'],
+                          size: 40,
+                          color: isSelected ? Theme.of(context).primaryColor : null,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          sound['name'],
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            color: isSelected ? Theme.of(context).primaryColor : null,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          
+          // Pulsante play/stop
+          if (_currentSound != null)
+            Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _isPlaying = !_isPlaying;
+                    // Avvia/ferma la riproduzione
+                  });
+                },
+                icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
+                label: Text(_isPlaying ? 'Stop' : 'Play'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 15),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// 5. Implementazione delle statistiche del sonno
+class SleepStats {
+  final DateTime date;
+  final int durationMinutes;
+  final double quality; // 0-1
+  final DateTime bedTime;
+  final DateTime wakeTime;
+  
+  SleepStats({
+    required this.date,
+    required this.durationMinutes,
+    required this.quality,
+    required this.bedTime,
+    required this.wakeTime,
+  });
+  
+  String get durationFormatted {
+    final hours = durationMinutes ~/ 60;
+    final minutes = durationMinutes % 60;
+    return '$hours ore ${minutes.toString().padLeft(2, '0')} min';
+  }
+  
+  String get qualityText {
+    if (quality >= 0.8) return 'Ottima';
+    if (quality >= 0.6) return 'Buona';
+    if (quality >= 0.4) return 'Discreta';
+    if (quality >= 0.2) return 'Scarsa';
+    return 'Molto scarsa';
+  }
+  
+  Map<String, dynamic> toJson() => {
+    'date': date.toIso8601String(),
+    'durationMinutes': durationMinutes,
+    'quality': quality,
+    'bedTime': bedTime.toIso8601String(),
+    'wakeTime': wakeTime.toIso8601String(),
+  };
+  
+  factory SleepStats.fromJson(Map<String, dynamic> json) {
+    return SleepStats(
+      date: DateTime.parse(json['date']),
+      durationMinutes: json['durationMinutes'],
+      quality: json['quality'],
+      bedTime: DateTime.parse(json['bedTime']),
+      wakeTime: DateTime.parse(json['wakeTime']),
+    );
+  }
+}
+
+// 6. Schermata delle statistiche del sonno
+class SleepStatsScreen extends StatelessWidget {
+  final List<SleepStats> stats;
+  
+  const SleepStatsScreen({Key? key, required this.stats}) : super(key: key);
+  
+  @override
+  Widget build(BuildContext context) {
+    // Calcola la media delle ore di sonno
+    final avgDuration = stats.isEmpty
+        ? 0
+        : stats.map((s) => s.durationMinutes).reduce((a, b) => a + b) / stats.length;
+    
+    // Calcola la media della qualità del sonno
+    final avgQuality = stats.isEmpty
+        ? 0.0
+        : stats.map((s) => s.quality).reduce((a, b) => a + b) / stats.length;
+    
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Statistiche del Sonno'),
+        centerTitle: true,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Riepilogo
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Riepilogo',
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildStatCard(
+                          'Media ore di sonno',
+                          '${(avgDuration / 60).toStringAsFixed(1)} ore',
+                          Icons.bedtime,
+                        ),
+                        _buildStatCard(
+                          'Qualità media',
+                          '${(avgQuality * 100).toStringAsFixed(0)}%',
+                          Icons.star,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
+            
+            // Grafico (placeholder)
+            const Card(
+              child: SizedBox(
+                height: 200,
+                child: Center(
+                  child: Text('Grafico delle ore di sonno'),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 20),
+            
+            // Storico
+            const Text(
+              'Storico',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            
+            ...stats.map((stat) => _buildSleepHistoryItem(stat)).toList(),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Widget _buildStatCard(String title, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, size: 40),
+        const SizedBox(height: 8),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 14),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+      ],
+    );
+  }
+  
+  Widget _buildSleepHistoryItem(SleepStats stat) {
+    final dateFormat = DateFormat('dd/MM/yyyy');
+    final timeFormat = DateFormat('HH:mm');
+    
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    dateFormat.format(stat.date),
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${timeFormat.format(stat.bedTime)} - ${timeFormat.format(stat.wakeTime)}',
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    stat.durationFormatted,
+                    style: const TextStyle(fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  'Qualità',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  stat.qualityText,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: _getQualityColor(stat.quality),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+  
+  Color _getQualityColor(double quality) {
+    if (quality >= 0.8) return Colors.green;
+    if (quality >= 0.6) return Colors.lightGreen;
+    if (quality >= 0.4) return Colors.amber;
+    if (quality >= 0.2) return Colors.orange;
+    return Colors.red;
+  }
+}
+
+// 7. Estensione della HomeScreen per includere nuove funzionalità
+class EnhancedHomeScreen extends StatefulWidget {
+  const EnhancedHomeScreen({super.key});
+
+  @override
+  _EnhancedHomeScreenState createState() => _EnhancedHomeScreenState();
+}
+
+class _EnhancedHomeScreenState extends State<EnhancedHomeScreen> {
+  int _currentIndex = 0;
+
+  final List<Widget> _screens = [
+    const AlarmScreen(),
+    const ReminderScreen(),
+    const RelaxScreen(),
+    const SleepStatsScreen(stats: []), // Placeholder, da popolare con dati reali
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(_getScreenTitle()),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              // Navigare alla schermata delle impostazioni
+            },
+          ),
+        ],
+      ),
+      body: _screens[_currentIndex],
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.alarm),
+            label: 'Sveglie',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.notifications),
+            label: 'Promemoria',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.spa),
+            label: 'Relax',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.bar_chart),
+            label: 'Statistiche',
+          ),
+        ],
+        onTap: (index) {
+          setState(() => _currentIndex = index);
+        },
+      ),
+    );
+  }
+  
+  String _getScreenTitle() {
+    switch (_currentIndex) {
+      case 0:
+        return 'Sveglie Intelligenti';
+      case 1:
+        return 'Promemoria';
+      case 2:
+        return 'Relax';
+      case 3:
+        return 'Statistiche del Sonno';
+      default:
+        return 'SmartAlarm Pro';
+    }
+  }
+}
+
+// 8. Classe per le impostazioni dell'app
+class AppSettings {
+  final bool darkMode;
+  final bool useSystemTheme;
+  final String defaultAlarmSound;
+  final int defaultSnoozeTime;
+  final bool vibrationEnabled;
+  final bool progressiveVolumeEnabled;
+  
+  AppSettings({
+    this.darkMode = false,
+    this.useSystemTheme = true,
+    this.defaultAlarmSound = 'beep',
+    this.defaultSnoozeTime = 5,
+    this.vibrationEnabled = true,
+    this.progressiveVolumeEnabled = false,
+  });
+  
+  Map<String, dynamic> toJson() => {
+    'darkMode': darkMode,
+    'useSystemTheme': useSystemTheme,
+    'defaultAlarmSound': defaultAlarmSound,
+    'defaultSnoozeTime': defaultSnoozeTime,
+    'vibrationEnabled': vibrationEnabled,
+    'progressiveVolumeEnabled': progressiveVolumeEnabled,
+  };
+  
+  factory AppSettings.fromJson(Map<String, dynamic> json) {
+    return AppSettings(
+      darkMode: json['darkMode'] ?? false,
+      useSystemTheme: json['useSystemTheme'] ?? true,
+      defaultAlarmSound: json['defaultAlarmSound'] ?? 'beep',
+      defaultSnoozeTime: json['defaultSnoozeTime'] ?? 5,
+      vibrationEnabled: json['vibrationEnabled'] ?? true,
+      progressiveVolumeEnabled: json['progressiveVolumeEnabled'] ?? false,
+    );
+  }
+  
+  AppSettings copyWith({
+    bool? darkMode,
+    bool? useSystemTheme,
+    String? defaultAlarmSound,
+    int? defaultSnoozeTime,
+    bool? vibrationEnabled,
+    bool? progressiveVolumeEnabled,
+  }) {
+    return AppSettings(
+      darkMode: darkMode ?? this.darkMode,
+      useSystemTheme: useSystemTheme ?? this.useSystemTheme,
+      defaultAlarmSound: defaultAlarmSound ?? this.defaultAlarmSound,
+      defaultSnoozeTime: defaultSnoozeTime ?? this.defaultSnoozeTime,
+      vibrationEnabled: vibrationEnabled ?? this.vibrationEnabled,
+      progressiveVolumeEnabled: progressiveVolumeEnabled ?? this.progressiveVolumeEnabled,
+    );
+  }
+}
+
+// 9. Schermata delle impostazioni
+class SettingsScreen extends StatefulWidget {
+  final AppSettings settings;
+  final Function(AppSettings) onSettingsChanged;
+  
+  const SettingsScreen({
+    Key? key,
+    required this.settings,
+    required this.onSettingsChanged,
+  }) : super(key: key);
+  
+  @override
+  _SettingsScreenState createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  late AppSettings _settings;
+  
+  @override
+  void initState() {
+    super.initState();
+    _settings = widget.settings;
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Impostazioni'),
+        centerTitle: true,
+      ),
+      body: ListView(
+        children: [
+          // Sezione Tema
+          _buildSectionHeader('Tema'),
+          SwitchListTile(
+            title: const Text('Usa tema di sistema'),
+            value: _settings.useSystemTheme,
+            onChanged: (value) {
+              setState(() {
+                _settings = _settings.copyWith(useSystemTheme: value);
+                widget.onSettingsChanged(_settings);
+              });
+            },
+          ),
+          if (!_settings.useSystemTheme)
+            SwitchListTile(
+              title: const Text('Tema scuro'),
+              value: _settings.darkMode,
+              onChanged: (value) {
+                setState(() {
+                  _settings = _settings.copyWith(darkMode: value);
+                  widget.onSettingsChanged(_settings);
+                });
+              },
+            ),
+          
+          // Sezione Sveglie
+          _buildSectionHeader('Sveglie'),
+          ListTile(
+            title: const Text('Suono predefinito'),
+            subtitle: Text(_settings.defaultAlarmSound),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              // Mostra dialog per selezionare il suono predefinito
+            },
+          ),
+          ListTile(
+            title: const Text('Tempo di posticipo predefinito'),
+            subtitle: Text('${_settings.defaultSnoozeTime} minuti'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              // Mostra dialog per selezionare il tempo di posticipo
+            },
+          ),
+          SwitchListTile(
+            title: const Text('Vibrazione'),
+            value: _settings.vibrationEnabled,
+            onChanged: (value) {
+              setState(() {
+                _settings = _settings.copyWith(vibrationEnabled: value);
+                widget.onSettingsChanged(_settings);
+              });
+            },
+          ),
+          SwitchListTile(
+            title: const Text('Volume progressivo'),
+            subtitle: const Text('Il volume aumenta gradualmente'),
+            value: _settings.progressiveVolumeEnabled,
+            onChanged: (value) {
+              setState(() {
+                _settings = _settings.copyWith(progressiveVolumeEnabled: value);
+                widget.onSettingsChanged(_settings);
+              });
+            },
+          ),
+          
+          // Sezione Info
+          _buildSectionHeader('Informazioni'),
+          ListTile(
+            title: const Text('Versione'),
+            subtitle: const Text('1.0.0'),
+          ),
+          ListTile(
+            title: const Text('Backup/Ripristino'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              // Mostra opzioni di backup/ripristino
+            },
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Widget _buildSectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Text(
+        title,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.bold,
+          color: Theme.of(context).primaryColor,
+        ),
+      ),
+    );
+  }
+}
+

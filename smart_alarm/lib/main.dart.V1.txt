@@ -1,17 +1,16 @@
+import 'dart:convert'; // AGGIUNTO
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
-import 'package:timezone/data/latest.dart' as tzdata;
+import 'package:timezone/data/latest.dart' as tz;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'dart:math';
-import 'dart:convert'; // Aggiunto per JSON encoding/decoding
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NotificationService().init();
-  tzdata.initializeTimeZones();
-  tz.setLocalLocation(tz.getLocation('Europe/Rome')); // Impostazione del fuso orario locale
+  tz.initializeTimeZones();
   runApp(const MyApp());
 }
 
@@ -461,10 +460,6 @@ class _AlarmGameScreenState extends State<AlarmGameScreen> {
       gameType: widget.alarm.gameType,
       sound: widget.alarm.sound,
     );
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sveglia posticipata di 5 minuti')),
-    );
     Navigator.pop(context);
   }
 
@@ -560,10 +555,8 @@ class MathProblem {
         answer = (num1 * num2).toString();
         break;
       case '/':
-        // Corretto per usare la divisione invece della moltiplicazione
-        num1 = num3 * num2; // Assicura che la divisione dia un risultato intero
-        expression = '$num1 ÷ $num2';
-        answer = num3.toString(); // Il risultato è num3
+        expression = '$num3 × $num2';
+        answer = (num3 * num2).toString();
         break;
       default:
         expression = '$num1 + $num2';
@@ -847,22 +840,17 @@ class _ReminderScreenState extends State<ReminderScreen> {
                 ),
                 TextButton(
                   onPressed: () {
-                    if (title.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Il titolo è obbligatorio')),
-                      );
-                      return;
+                    if (title.isNotEmpty) {
+                      _addReminder(Reminder(
+                        id: DateTime.now().millisecondsSinceEpoch,
+                        title: title,
+                        description: description,
+                        startTime: startTime,
+                        endTime: endTime,
+                        interval: interval,
+                      ));
+                      Navigator.pop(context);
                     }
-                    
-                    _addReminder(Reminder(
-                      id: DateTime.now().millisecondsSinceEpoch,
-                      title: title,
-                      description: description,
-                      startTime: startTime,
-                      endTime: endTime,
-                      interval: interval,
-                    ));
-                    Navigator.pop(context);
                   },
                   child: const Text('Salva'),
                 ),
@@ -908,11 +896,8 @@ class Reminder {
       title: map['title'],
       description: map['description'],
       startTime: DateTime.parse(map['startTime']),
-      endTime: (map['endTime'] != null && map['endTime'].toString().isNotEmpty)
-          ? DateTime.parse(map['endTime'])
-          : null,
+      endTime: map['endTime'] != null && map['endTime'] != "" ? DateTime.parse(map['endTime']) : null,
       interval: map['interval'],
     );
   }
 }
-

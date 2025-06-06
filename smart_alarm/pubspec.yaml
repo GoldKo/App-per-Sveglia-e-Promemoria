@@ -16,6 +16,13 @@ dependencies:
   shared_preferences: ^2.2.2
   math_expressions: ^2.3.0
   intl: ^0.20.2
+  # Aggiunti
+  # audioplayers: ^1.0.1  # Per la riproduzione dei suoni
+  # fl_chart: ^0.55.0     # Per i grafici delle statistiche
+  # health: ^4.1.1        # Per l'integrazione con Apple Health
+  # path_provider: ^2.0.11 # Per la gestione dei file
+  # provider: ^6.0.3 
+  # Aggiunti
 
 dev_dependencies:
   flutter_test:
